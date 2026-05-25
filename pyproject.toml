@@ -11,7 +11,7 @@ license = {text = "MIT"}
 description = "PyO3 bindings to sc-rs for Lawrence-Colman Shape Complementarity"
 
 [tool.maturin]
-features = ["pyo3/extension-module"]
+features = ["pyo3/extension-module", "pyo3/abi3-py310"]
 python-source = "python"
 module-name = "shape_complementarity._core"
 
