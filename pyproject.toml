@@ -3,7 +3,7 @@ requires = ["maturin>=1.5"]
 build-backend = "maturin"
 
 [project]
-name = "pysc"
+name = "shape-complementarity"
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = ["numpy>=1.24", "biopython>=1.83"]
@@ -16,9 +16,9 @@ python-source = "python"
 module-name = "pysc._core"
 
 [project.urls]
-Homepage = "https://github.com/aarteixeira/pysc"
-Repository = "https://github.com/aarteixeira/pysc"
-"Bug Tracker" = "https://github.com/aarteixeira/pysc/issues"
+Homepage = "https://github.com/aarteixeira/shape-complementarity"
+Repository = "https://github.com/aarteixeira/shape-complementarity"
+"Bug Tracker" = "https://github.com/aarteixeira/shape-complementarity/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

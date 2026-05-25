@@ -22,7 +22,7 @@ maturin develop --release
 
 **Release / production:**
 ```bash
-pip install pysc
+pip install shape-complementarity
 ```
 
 ---
