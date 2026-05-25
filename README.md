@@ -1,9 +1,9 @@
 # pysc [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Python bindings to [sc-rs](https://github.com/cytokineking/sc-rs) for computing
-**Lawrence-Colman Shape Complementarity (SC)** on protein interfaces. Intended
-for filtering candidate nanobody:antigen complexes during computational design
-pipelines.
+**Lawrence-Colman Shape Complementarity (SC)** between two protein chains.
+Useful for analysing protein–protein interfaces, including in computational
+design pipelines.
 
 `pysc` is **not** a reimplementation of the SC algorithm. All algorithmic
 correctness comes from the upstream Rust crate `sc-rs`, which is invoked
