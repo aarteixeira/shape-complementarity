@@ -13,7 +13,7 @@ description = "PyO3 bindings to sc-rs for Lawrence-Colman Shape Complementarity"
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
-module-name = "pysc._core"
+module-name = "shape_complementarity._core"
 
 [project.urls]
 Homepage = "https://github.com/aarteixeira/shape-complementarity"

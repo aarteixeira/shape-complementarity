@@ -1,11 +1,11 @@
-# pysc [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+# shape_complementarity [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Python bindings to [sc-rs](https://github.com/cytokineking/sc-rs) for computing
 **Lawrence-Colman Shape Complementarity (SC)** between two protein chains.
 Useful for analysing protein–protein interfaces, including in computational
 design pipelines.
 
-`pysc` is **not** a reimplementation of the SC algorithm. All algorithmic
+`shape_complementarity` is **not** a reimplementation of the SC algorithm. All algorithmic
 correctness comes from the upstream Rust crate `sc-rs`, which is invoked
 directly via PyO3. If you find a numerical result surprising, verify against the
 `sc-rs` CLI first.
@@ -34,19 +34,19 @@ pip install shape-complementarity
 The simplest entry point. Accepts `.pdb`, `.ent`, and `.cif` files.
 
 ```python
-import pysc
+import shape_complementarity
 
-result = pysc.from_pdb("complex.pdb", chains_a=["H"], chains_b=["A"])
+result = shape_complementarity.from_pdb("complex.pdb", chains_a=["H"], chains_b=["A"])
 print(result.sc)               # e.g. 0.714
 print(result.median_distance)  # Å
 print(result.trimmed_area)     # Å²
 print(result.atoms_a, result.atoms_b)
 
 # chains_b=None → all chains not in chains_a
-result = pysc.from_pdb("complex.pdb", chains_a=["H"])
+result = shape_complementarity.from_pdb("complex.pdb", chains_a=["H"])
 
 # mmCIF works identically
-result = pysc.from_pdb("complex.cif", chains_a=["H"], chains_b=["A"])
+result = shape_complementarity.from_pdb("complex.cif", chains_a=["H"], chains_b=["A"])
 ```
 
 ---
@@ -58,12 +58,12 @@ need to manipulate the structure before scoring.
 
 ```python
 from Bio.PDB import PDBParser
-import pysc
+import shape_complementarity
 
 parser = PDBParser(QUIET=True)
 structure = parser.get_structure("complex", "complex.pdb")
 
-result = pysc.from_structure(structure, chains_a=["H"], chains_b=["A"])
+result = shape_complementarity.from_structure(structure, chains_a=["H"], chains_b=["A"])
 ```
 
 Works with any biopython `Structure` regardless of how it was created
@@ -78,12 +78,12 @@ analysis stack. Pass an `AtomArray` or `AtomArrayStack` (first model is used).
 
 ```python
 import biotite.structure.io.pdbx as pdbx
-import pysc
+import shape_complementarity
 
 cif = pdbx.CIFFile.read("complex.cif")
 atoms = pdbx.get_structure(cif, model=1, use_author_fields=False)
 
-result = pysc.from_biotite(atoms, chains_a=["H"], chains_b=["A"])
+result = shape_complementarity.from_biotite(atoms, chains_a=["H"], chains_b=["A"])
 ```
 
 ---
@@ -96,9 +96,9 @@ residue names. Useful when coordinates are already in memory from a simulation
 or generative model.
 
 ```python
-import pysc
+import shape_complementarity
 
-result = pysc.compute_sc(
+result = shape_complementarity.compute_sc(
     coords_a        = [[x, y, z], ...],   # shape (N, 3), Å
     atom_names_a    = ["CA", "CB", ...],
     residue_names_a = ["ALA", "ALA", ...],
@@ -122,10 +122,10 @@ sidechain coordinates and should not be used for SC.
 
 **Option A — file path (no extra dependencies):**
 ```python
-import pysc
+import shape_complementarity
 
 # Works exactly like from_pdb; biopython handles the mmCIF
-result = pysc.from_pdb(
+result = shape_complementarity.from_pdb(
     "output/intermediate_designs_inverse_folded/refold_cif/design_0.cif",
     chains_a=["B"],  # binder
     chains_b=["A"],  # target
@@ -134,9 +134,9 @@ result = pysc.from_pdb(
 
 **Option B — via biotite (matches BoltzGen's own analysis stack):**
 ```python
-import pysc
+import shape_complementarity
 
-result = pysc.from_boltzgen_refold(
+result = shape_complementarity.from_boltzgen_refold(
     "output/.../refold_cif/design_0.cif",
     chains_a=["B"],
     chains_b=["A"],
@@ -149,10 +149,10 @@ No boltzgen import required; the function duck-types against the numpy
 structured-array layout of `boltzgen.data.data.Structure`.
 
 ```python
-import pysc
+import shape_complementarity
 
 # structure is a boltzgen.data.data.Structure loaded elsewhere in the pipeline
-result = pysc.from_boltzgen_structure(
+result = shape_complementarity.from_boltzgen_structure(
     structure,
     chains_a=["B"],
     chains_b=["A"],
@@ -174,11 +174,11 @@ reported in the `status` / `error` columns rather than crashing the batch.
 
 ```python
 from pathlib import Path
-import pysc
+import shape_complementarity
 
 paths = list(Path("refold_cif").glob("*.cif"))
 
-df = pysc.score_many(
+df = shape_complementarity.score_many(
     paths,
     chains_a=["B"],
     chains_b=["A"],
@@ -211,15 +211,15 @@ All functions return an `ScResult` with these read-only properties:
 
 ```python
 import numpy as np
-import pysc
+import shape_complementarity
 
 # Score known native complexes to establish a baseline
-natives = pysc.score_many(native_pdbs, chains_a=["H"], chains_b=["A"])
+natives = shape_complementarity.score_many(native_pdbs, chains_a=["H"], chains_b=["A"])
 threshold = np.percentile(natives[natives.status == "ok"]["sc"], 5)
 print(f"5th-percentile SC threshold: {threshold:.3f}")
 
 # Filter design candidates
-designs = pysc.score_many(design_pdbs, chains_a=["H"], chains_b=["A"])
+designs = shape_complementarity.score_many(design_pdbs, chains_a=["H"], chains_b=["A"])
 passing = designs[designs["sc"] >= threshold]
 ```
 
@@ -232,7 +232,7 @@ on an Apple M3 Pro (10-core) with 1FYT chains D vs A (1521+1479 heavy atoms,
 ~190 residues each):
 
 ```
-=== pysc speed benchmark ===
+=== shape_complementarity speed benchmark ===
 
   [PASS] from_pdb (1FYT, 300+300 residues)           115.2 ms   target: < 200 ms
   [PASS] compute_sc (1521 + 1479 atoms)               63.7 ms   target: < 100 ms
@@ -251,7 +251,7 @@ as shown above. `score_many` amortises this across worker processes.
 
 - **Not a reimplementation of SC.** The algorithm lives entirely in `sc-rs`.
 - **Not a design filter.** Threshold selection and chain naming belong in the consuming pipeline.
-- **No asymmetric S_AB / S_BA breakdown.** If `sc-rs` does not expose it, `pysc` does not invent it.
+- **No asymmetric S_AB / S_BA breakdown.** If `sc-rs` does not expose it, `shape_complementarity` does not invent it.
 
 ---
 

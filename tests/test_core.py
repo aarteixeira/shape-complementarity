@@ -1,7 +1,7 @@
 """Tests for pysc._core (the Rust extension module)."""
 import pytest
 
-from pysc._core import ScResult, compute_sc
+from shape_complementarity._core import ScResult, compute_sc
 
 # 10 ALA CA atoms per group, spaced 3.8 Å apart, ~5 Å between groups.
 # Enough to generate surface dots; chosen to avoid empty-surface errors.

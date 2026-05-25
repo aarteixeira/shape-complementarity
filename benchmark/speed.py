@@ -65,7 +65,7 @@ def _build_shared_state():
     """
     from Bio.PDB import PDBParser
 
-    from pysc.io import _extract_atom_arrays, _is_hydrogen, _select_real_atom
+    from shape_complementarity.io import _extract_atom_arrays, _is_hydrogen, _select_real_atom
 
     parser = PDBParser(QUIET=True)
     bio_structure = parser.get_structure("1fyt", str(PDB_1FYT))
@@ -199,7 +199,7 @@ def bench(fn, n=REPS):
 
 
 def run_all(state):
-    from pysc import (
+    from shape_complementarity import (
         compute_sc,
         from_biotite,
         from_boltzgen_refold,
@@ -329,7 +329,7 @@ def print_speed_table(timings):
 
 
 def bench_batch():
-    from pysc import score_many
+    from shape_complementarity import score_many
 
     paths = [PDB_1FYT] * 100
     score_many(paths, CHAINS_A, CHAINS_B, n_workers=8)  # warmup
@@ -345,7 +345,7 @@ def bench_batch():
 def main():
     _ensure_fixtures()
 
-    print(f"\n=== pysc benchmark — 1FYT chains {CHAINS_A[0]} vs {CHAINS_B[0]} ===\n")
+    print(f"\n=== shape_complementarity benchmark — 1FYT chains {CHAINS_A[0]} vs {CHAINS_B[0]} ===\n")
 
     print("Building shared state (parse 1FYT once) …")
     state = _build_shared_state()

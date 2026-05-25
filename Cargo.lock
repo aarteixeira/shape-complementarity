@@ -178,14 +178,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pysc"
-version = "0.1.0"
-dependencies = [
- "pyo3",
- "sc-rs",
-]
-
-[[package]]
 name = "quote"
 version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -273,6 +265,14 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "shape-complementarity"
+version = "0.1.0"
+dependencies = [
+ "pyo3",
+ "sc-rs",
 ]
 
 [[package]]

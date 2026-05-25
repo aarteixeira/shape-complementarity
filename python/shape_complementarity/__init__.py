@@ -1,6 +1,6 @@
-from pysc._core import ScResult, compute_sc
-from pysc.batch import score_many
-from pysc.io import (
+from shape_complementarity._core import ScResult, compute_sc
+from shape_complementarity.batch import score_many
+from shape_complementarity.io import (
     from_biotite,
     from_boltzgen_refold,
     from_boltzgen_structure,

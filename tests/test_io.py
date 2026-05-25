@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from pysc import from_pdb, from_structure
-from pysc._core import ScResult
+from shape_complementarity import from_pdb, from_structure
+from shape_complementarity._core import ScResult
 
 DATA = Path(__file__).parent / "data"
 FYT = DATA / "1fyt.pdb"

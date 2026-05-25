@@ -8,9 +8,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from pysc import from_biotite, from_boltzgen_structure
-from pysc._core import ScResult
-from pysc.io import _is_hydrogen
+from shape_complementarity import from_biotite, from_boltzgen_structure
+from shape_complementarity._core import ScResult
+from shape_complementarity.io import _is_hydrogen
 
 
 # ── helpers to build minimal mock Structure ──────────────────────────────────

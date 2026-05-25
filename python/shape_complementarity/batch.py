@@ -15,7 +15,7 @@ def _score_one(args: tuple) -> dict:
     """Top-level worker function (must be picklable — no closures)."""
     pdb_path, chains_a, chains_b, kwargs = args
     try:
-        from pysc.io import from_pdb
+        from shape_complementarity.io import from_pdb
 
         result = from_pdb(pdb_path, chains_a, chains_b, **kwargs)
         return {

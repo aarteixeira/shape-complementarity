@@ -14,6 +14,6 @@
 - `score_many()`: multiprocessing batch scorer returning a `pd.DataFrame`;
   per-file exceptions are caught and reported in a `status`/`error` column.
 - Full test suite: unit tests for the Rust core, IO layer, and parity tests
-  comparing `pysc` output against the `sc-rs` CLI binary.
+  comparing `shape_complementarity` output against the `sc-rs` CLI binary.
 - Benchmark script (`benchmark/speed.py`).
 - Pinned to `sc-rs` v1.0.0 via git tag.

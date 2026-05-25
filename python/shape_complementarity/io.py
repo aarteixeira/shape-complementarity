@@ -20,7 +20,7 @@ import numpy as np
 if TYPE_CHECKING:
     from Bio.PDB.Structure import Structure as BioStructure
 
-from pysc._core import ScResult, compute_sc
+from shape_complementarity._core import ScResult, compute_sc
 
 
 # ── Hydrogen detection (mirrors sc-rs bin/sc.rs) ────────────────────────────

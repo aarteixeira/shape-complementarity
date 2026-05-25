@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from pysc import from_pdb
+from shape_complementarity import from_pdb
 
 DATA = Path(__file__).parent / "data"
 SC_BINARY = shutil.which("sc")
