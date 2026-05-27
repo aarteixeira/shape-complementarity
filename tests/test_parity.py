@@ -71,7 +71,7 @@ def _run_cli(pdb: Path, chain1: str, chain2: str) -> dict:
 def test_parity_atom_counts(pdb, chain_a, chain_b):
     """Atom counts must match exactly — this confirms identical PDB parsing."""
     cli = _run_cli(pdb, chain_a, chain_b)
-    py = from_pdb(pdb, [chain_a], [chain_b], parallel=False)
+    py = from_pdb(pdb, [chain_a], [chain_b], parallel=False, altloc_policy="sc_rs")
     assert py.atoms_a == cli["atoms_mol1"], (
         f"atoms_a mismatch: pysc={py.atoms_a}, cli={cli['atoms_mol1']}"
     )
@@ -85,7 +85,7 @@ def test_parity_atom_counts(pdb, chain_a, chain_b):
 def test_parity_sc(pdb, chain_a, chain_b):
     """SC value matches CLI within cross-compilation FP tolerance."""
     cli = _run_cli(pdb, chain_a, chain_b)
-    py = from_pdb(pdb, [chain_a], [chain_b], parallel=False)
+    py = from_pdb(pdb, [chain_a], [chain_b], parallel=False, altloc_policy="sc_rs")
     assert abs(py.sc - cli["sc"]) < _TOL, (
         f"SC mismatch: pysc={py.sc:.8f}, cli={cli['sc']:.8f}, "
         f"diff={abs(py.sc - cli['sc']):.2e} (tol={_TOL:.0e})"
@@ -97,7 +97,7 @@ def test_parity_sc(pdb, chain_a, chain_b):
 def test_parity_median_distance(pdb, chain_a, chain_b):
     """Median distance matches CLI within cross-compilation FP tolerance."""
     cli = _run_cli(pdb, chain_a, chain_b)
-    py = from_pdb(pdb, [chain_a], [chain_b], parallel=False)
+    py = from_pdb(pdb, [chain_a], [chain_b], parallel=False, altloc_policy="sc_rs")
     assert abs(py.median_distance - cli["median_distance"]) < _TOL, (
         f"median_distance mismatch: pysc={py.median_distance:.8f}, "
         f"cli={cli['median_distance']:.8f}, "
@@ -110,7 +110,7 @@ def test_parity_median_distance(pdb, chain_a, chain_b):
 def test_parity_trimmed_area(pdb, chain_a, chain_b):
     """Trimmed area matches CLI within cross-compilation FP tolerance."""
     cli = _run_cli(pdb, chain_a, chain_b)
-    py = from_pdb(pdb, [chain_a], [chain_b], parallel=False)
+    py = from_pdb(pdb, [chain_a], [chain_b], parallel=False, altloc_policy="sc_rs")
     assert abs(py.trimmed_area - cli["trimmed_area"]) < _TOL, (
         f"trimmed_area mismatch: pysc={py.trimmed_area:.8f}, "
         f"cli={cli['trimmed_area']:.8f}, "

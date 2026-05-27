@@ -4,9 +4,9 @@ build-backend = "maturin"
 
 [project]
 name = "shape-complementarity"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.10"
-dependencies = ["numpy>=1.24", "biopython>=1.83"]
+dependencies = ["numpy>=1.24", "biopython>=1.83", "pandas>=2.0"]
 license = {text = "MIT"}
 description = "PyO3 bindings to sc-rs for Lawrence-Colman Shape Complementarity"
 
@@ -20,5 +20,16 @@ Homepage = "https://github.com/aarteixeira/shape-complementarity"
 Repository = "https://github.com/aarteixeira/shape-complementarity"
 "Bug Tracker" = "https://github.com/aarteixeira/shape-complementarity/issues"
 
+[project.optional-dependencies]
+test = [
+    "biotite>=1.5,<2",
+    "maturin>=1.5",
+    "pytest>=8,<10",
+    "pytest-timeout>=2.4",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "rosetta: optional PyRosetta validation tests",
+]

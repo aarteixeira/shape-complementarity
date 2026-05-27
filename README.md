@@ -16,9 +16,16 @@ directly via PyO3. If you find a numerical result surprising, verify against the
 
 **Development (editable, re-run after Rust changes):**
 ```bash
-pip install maturin
-maturin develop --release
+~/miniforge3/bin/python3 -m venv .venv
+.venv/bin/python -m pip install -U pip setuptools wheel
+.venv/bin/python -m pip install -e ".[test]"
+.venv/bin/python -m pip install maturin
+.venv/bin/maturin develop --release
 ```
+
+If your shell still has `CONDA_PREFIX` set, run
+`unset CONDA_PREFIX && source .venv/bin/activate && maturin develop --release`
+so maturin installs into `.venv` instead of the base conda environment.
 
 **Release / production:**
 ```bash
@@ -48,6 +55,12 @@ result = shape_complementarity.from_pdb("complex.pdb", chains_a=["H"])
 # mmCIF works identically
 result = shape_complementarity.from_pdb("complex.cif", chains_a=["H"], chains_b=["A"])
 ```
+
+By default, PDB/mmCIF parsing is strict: requested chains must exist,
+`chains_a` and `chains_b` must not overlap, alternate locations raise an error,
+and empty post-filter atom groups raise before the Rust core is called. Use
+`altloc_policy="highest_occupancy"` to select the highest-occupancy conformer,
+or `altloc_policy="sc_rs"` only when matching the upstream `sc-rs` CLI parser.
 
 ---
 
@@ -109,8 +122,10 @@ result = shape_complementarity.compute_sc(
 ```
 
 Atom radii are assigned automatically from the atom-name + residue-name pair.
-Atoms whose combination is not in the sc-rs radius table are silently dropped
-(same behavior as the sc-rs CLI).
+If no specific residue/atom radius matches, `sc-rs` may use a generic element
+fallback such as carbon or nitrogen. Atoms with no specific or generic radius
+raise an error. Ligand or non-protein scoring therefore requires deliberate
+radii validation before interpreting SC values.
 
 ---
 
@@ -143,22 +158,6 @@ result = shape_complementarity.from_boltzgen_refold(
 )
 ```
 
-**Option C — from an in-memory BoltzGen `Structure` object:**
-
-No boltzgen import required; the function duck-types against the numpy
-structured-array layout of `boltzgen.data.data.Structure`.
-
-```python
-import shape_complementarity
-
-# structure is a boltzgen.data.data.Structure loaded elsewhere in the pipeline
-result = shape_complementarity.from_boltzgen_structure(
-    structure,
-    chains_a=["B"],
-    chains_b=["A"],
-)
-```
-
 > **Which stage to use?** Only `refold_cif/` structures have complete, physically
 > validated all-atom coordinates. `intermediate_designs/` NPZ files (post-generation)
 > have backbone-only coordinates; `intermediate_designs_inverse_folded/` NPZ files
@@ -168,9 +167,10 @@ result = shape_complementarity.from_boltzgen_structure(
 
 ### 6. Batch scoring
 
-Score many files in parallel using `ProcessPoolExecutor`. Returns a
-`pd.DataFrame` with one row per file; exceptions are caught per-file and
-reported in the `status` / `error` columns rather than crashing the batch.
+Score many files in parallel using `ProcessPoolExecutor`. By default, any
+per-file failure raises a summary error after workers finish. Use
+`on_error="record"` only for exploratory batches where failed rows should be
+returned with `status="error"` and `NaN` numeric fields.
 
 ```python
 from pathlib import Path
@@ -193,17 +193,73 @@ to avoid oversubscription with multiple processes.
 
 ---
 
+## Intake-format equivalence
+
+Every supported loader is locked together by
+[`tests/test_format_equivalence.py`](tests/test_format_equivalence.py), which
+verifies that loading the same structure (1FYT chains D vs A) through each
+entry point yields the same `sc` and atom counts:
+
+| Comparison | Tolerance | 1FYT result |
+|---|---|---|
+| `from_pdb(.pdb)` ↔ `from_pdb(.cif)` (biopython PDBParser vs MMCIFParser) | 10⁻⁶ | sc = 0.6597, 1521 + 1479 atoms |
+| `from_structure(pre-parsed)` ↔ `from_pdb(file)` | 10⁻⁶ | identical |
+| `from_biotite(CIF via biotite)` ↔ `from_pdb(.pdb)` | 10⁻³ SC, ±5 atoms | identical |
+| `from_boltzgen_structure(1FYT-shaped struct)` ↔ `from_pdb(.pdb)` | 10⁻⁶ | identical |
+
+Empirically all four comparisons currently pass at the tight end of their
+tolerance. Any future parser change that shifts atom selection or coordinate
+rounding will fail the suite immediately.
+
+This is in addition to the value-matching tests in
+[`tests/test_parity.py`](tests/test_parity.py), which run the actual `sc-rs`
+CLI binary on disk and confirm `sc`, `median_distance`, `trimmed_area`, and
+atom counts all agree to within 10⁻³ — a tolerance set by LLVM FMA-folding
+differences between independently compiled cdylib and binary, not by anything
+algorithmic.
+
+---
+
 ## ScResult
 
 All functions return an `ScResult` with these read-only properties:
 
 | Property | Type | Description |
 |---|---|---|
-| `sc` | `float` | Shape complementarity (−1 to 1; native interfaces typically 0.6–0.8) |
+| `sc` | `float` | Shape complementarity (see range note below; native interfaces typically 0.6–0.8) |
 | `median_distance` | `float` | Median nearest-surface distance (Å) |
 | `trimmed_area` | `float` | Total trimmed interface area (Å²) |
 | `atoms_a` | `int` | Heavy atoms accepted for molecule A |
 | `atoms_b` | `int` | Heavy atoms accepted for molecule B |
+
+### A note on the SC range
+
+The Lawrence–Colman SC statistic is the median of per-point scores of the form
+`(n_A · n_B′) · exp(−w · d²)`, where `n_A` and `n_B′` are surface normals at a
+point on A and its nearest neighbor on B (with one normal flipped so that two
+perfectly mated surfaces score +1). The exponential lies in [0, 1] and the dot
+product of unit normals lies in [−1, 1], so the **mathematical range of SC is
+−1 to 1**.
+
+In practice the original paper and downstream tools (CCP4 `sc`, Rosetta) quote
+the range as **0 to 1**:
+
+- **1.0** — perfect geometric complementarity (mated, parallel surfaces)
+- **~0.6–0.8** — typical native protein–protein interface
+- **~0** — uncorrelated / random surface orientations
+- **< 0** — mathematically possible but not biologically meaningful
+
+Negative values require both **co-located** points (`d ≈ 0`, so the
+exponential is ≈ 1) **and co-aligned normals** (dot product ≈ +1, which after
+the sign flip becomes −1). That is, two surfaces stacked on top of each other
+rather than mated face-to-face. Concretely, scoring chain A of 1FYT against an
+identical copy of itself placed at the same coordinates yields `sc ≈ −0.999`;
+shifting one copy by just 1 Å already brings the score back to ≈ 0 because the
+`exp(−w·d²)` term collapses. Real interfaces never look like this, so for any
+physically reasonable complex you should expect a value in [0, 1].
+
+`shape_complementarity` reports whatever `sc-rs` returns without clamping, so
+the strict range is −1 to 1.
 
 ---
 
@@ -215,13 +271,28 @@ import shape_complementarity
 
 # Score known native complexes to establish a baseline
 natives = shape_complementarity.score_many(native_pdbs, chains_a=["H"], chains_b=["A"])
-threshold = np.percentile(natives[natives.status == "ok"]["sc"], 5)
+threshold = np.percentile(natives["sc"], 5)
 print(f"5th-percentile SC threshold: {threshold:.3f}")
 
 # Filter design candidates
 designs = shape_complementarity.score_many(design_pdbs, chains_a=["H"], chains_b=["A"])
 passing = designs[designs["sc"] >= threshold]
 ```
+
+## Rosetta / PyRosetta validation
+
+PyRosetta is not a package dependency. In an environment where `import
+pyrosetta` works, validate against Rosetta `InterfaceAnalyzerMover` with:
+
+```bash
+.venv/bin/python validation/rosetta_interface_sc.py --format tsv
+.venv/bin/python -m pytest -q -m rosetta
+```
+
+The validation script compares bundled 1FYT and nanobody-antigen fixtures
+against PyRosetta's interface SC value and fails if `abs(package_sc -
+pyrosetta_sc) > 0.05`. If PyRosetta is not installed, the `rosetta` pytest
+test is skipped with an explicit message.
 
 ---
 

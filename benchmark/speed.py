@@ -71,8 +71,8 @@ def _build_shared_state():
     bio_structure = parser.get_structure("1fyt", str(PDB_1FYT))
     model = list(bio_structure.get_models())[0]
 
-    coords_a, names_a, res_a = _extract_atom_arrays(model, CHAINS_A, False, False)
-    coords_b, names_b, res_b = _extract_atom_arrays(model, CHAINS_B, False, False)
+    coords_a, names_a, res_a = _extract_atom_arrays(model, CHAINS_A, False, False, "fail")
+    coords_b, names_b, res_b = _extract_atom_arrays(model, CHAINS_B, False, False, "fail")
 
     # ── biotite AtomArray (same atoms as biopython) ──────────────────────────
     try:
@@ -89,7 +89,7 @@ def _build_shared_state():
                     if residue.id[0] != " ":
                         continue
                     for da in residue.get_atoms():
-                        real = _select_real_atom(da)
+                        real = _select_real_atom(da, "fail")
                         if real is None:
                             continue
                         name = real.name.strip()
@@ -110,7 +110,7 @@ def _build_shared_state():
 
         biotite_array = struc.array(rows)
         has_biotite = True
-    except ImportError:
+    except Exception:
         biotite_array = None
         has_biotite = False
 

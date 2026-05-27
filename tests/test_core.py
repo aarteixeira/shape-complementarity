@@ -59,6 +59,24 @@ def test_compute_sc_length_mismatch_b():
         )
 
 
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_compute_sc_rejects_non_finite_coordinates(bad):
+    coords = [row[:] for row in _COORDS_A]
+    coords[3][1] = bad
+    with pytest.raises(ValueError, match="coords_a.*non-finite.*atom index 3.*axis 1"):
+        compute_sc(coords, _NAMES_A, _RES_A, _COORDS_B, _NAMES_B, _RES_B)
+
+
+def test_compute_sc_unknown_radius_errors():
+    with pytest.raises(ValueError, match="No radius"):
+        compute_sc(_COORDS_A, ["XX"] * 10, ["UNK"] * 10, _COORDS_B, _NAMES_B, _RES_B)
+
+
+def test_compute_sc_generic_element_fallback_is_explicit_behavior():
+    result = compute_sc(_COORDS_A, ["CA"] * 10, ["UNK"] * 10, _COORDS_B, _NAMES_B, _RES_B)
+    assert result.atoms_a == 10
+
+
 def test_compute_sc_empty_group_a():
     """Empty coords_a → ValueError."""
     with pytest.raises(ValueError):

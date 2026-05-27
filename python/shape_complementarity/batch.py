@@ -47,6 +47,7 @@ def score_many(
     chains_b: list[str] | None = None,
     n_workers: int = 8,
     parallel: bool = False,
+    on_error: str = "raise",
     **kwargs,
 ) -> "pd.DataFrame":
     """Score many PDB files in parallel.
@@ -58,6 +59,8 @@ def score_many(
         n_workers:  number of worker processes
         parallel:   enable Rayon parallelism inside each worker (default False
                     to avoid oversubscription with multiple processes)
+        on_error:   'raise' (default) raises if any file fails; 'record'
+                    returns per-file error rows with NaN numeric fields
         **kwargs:   forwarded to from_pdb (model, include_hetatm, etc.)
 
     Returns:
@@ -66,6 +69,9 @@ def score_many(
             status ('ok' or 'error'), error (None or message string)
     """
     import pandas as pd
+
+    if on_error not in {"raise", "record"}:
+        raise ValueError(f"on_error must be 'raise' or 'record'; got {on_error!r}")
 
     kwargs["parallel"] = parallel
 
@@ -76,5 +82,17 @@ def score_many(
         max_workers=n_workers, mp_context=ctx
     ) as executor:
         rows = list(executor.map(_score_one, args_list))
+
+    if on_error == "raise":
+        failures = [row for row in rows if row["status"] != "ok"]
+        if failures:
+            examples = "; ".join(
+                f"{row['path']}: {row['error']}" for row in failures[:5]
+            )
+            more = "" if len(failures) <= 5 else f"; ... {len(failures) - 5} more"
+            raise ValueError(
+                f"shape-complementarity batch failed for {len(failures)} "
+                f"of {len(rows)} file(s): {examples}{more}"
+            )
 
     return pd.DataFrame(rows)

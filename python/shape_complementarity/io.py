@@ -1,6 +1,12 @@
 """PDB/CIF parsing for pysc.
 
-Parsing logic mirrors src/bin/sc.rs in sc-rs exactly so that parity tests pass:
+Default parsing is intentionally strict for scientific scoring:
+- Requested chains must exist and molecule groups may not overlap
+- Alternate locations fail unless an explicit policy is selected
+- Empty post-filter atom groups fail before calling the Rust core
+
+The "sc_rs" alternate-location policy mirrors src/bin/sc.rs in sc-rs so that
+parity tests can compare against the CLI:
 - ATOM records only (HETATM skipped unless include_hetatm=True)
 - Alternate locations: keep ' ' and 'A', skip all others
 - Hydrogens: excluded by default using the same heuristic as the CLI
@@ -41,21 +47,158 @@ def _is_hydrogen(atom_name: str, element: str) -> bool:
     return False
 
 
+# ── Shared validation helpers ────────────────────────────────────────────────
+
+_ALTLOC_POLICIES = {"fail", "highest_occupancy", "sc_rs"}
+
+
+def _validate_altloc_policy(altloc_policy: str) -> None:
+    if altloc_policy not in _ALTLOC_POLICIES:
+        raise ValueError(
+            f"altloc_policy must be one of {sorted(_ALTLOC_POLICIES)}; "
+            f"got {altloc_policy!r}"
+        )
+
+
+def _ordered_unique_str_list(label: str, values) -> list[str]:
+    if values is None:
+        raise ValueError(f"{label} must not be None")
+    result = [str(v) for v in values]
+    if not result:
+        raise ValueError(f"{label} must contain at least one chain ID")
+    duplicates = sorted({v for v in result if result.count(v) > 1})
+    if duplicates:
+        raise ValueError(f"{label} contains duplicate chain ID(s): {duplicates}")
+    return result
+
+
+def _resolve_chain_groups(
+    chains_a,
+    chains_b,
+    available_chains: list[str],
+    source: str,
+) -> tuple[list[str], list[str]]:
+    available = list(dict.fromkeys(str(c) for c in available_chains))
+    available_set = set(available)
+    chains_a = _ordered_unique_str_list("chains_a", chains_a)
+
+    missing_a = sorted(set(chains_a) - available_set)
+    if missing_a:
+        raise ValueError(
+            f"chains_a contains chain(s) not found in {source}: {missing_a}. "
+            f"Available chains: {available}"
+        )
+
+    if chains_b is None:
+        chains_b = [c for c in available if c not in set(chains_a)]
+    else:
+        chains_b = _ordered_unique_str_list("chains_b", chains_b)
+
+    if not chains_b:
+        raise ValueError(
+            f"chains_b resolved to no chains in {source}. "
+            "Provide non-overlapping chains_b explicitly."
+        )
+
+    missing_b = sorted(set(chains_b) - available_set)
+    if missing_b:
+        raise ValueError(
+            f"chains_b contains chain(s) not found in {source}: {missing_b}. "
+            f"Available chains: {available}"
+        )
+
+    overlap = sorted(set(chains_a) & set(chains_b))
+    if overlap:
+        raise ValueError(
+            f"chains_a and chains_b must be disjoint; overlapping chain(s): {overlap}"
+        )
+
+    return chains_a, chains_b
+
+
+def _require_nonempty_atoms(
+    group_name: str,
+    chain_ids: list[str],
+    coords: list[list[float]],
+    *,
+    include_hetatm: bool | None = None,
+    include_hydrogens: bool | None = None,
+    altloc_policy: str | None = None,
+) -> None:
+    if coords:
+        return
+    filters = []
+    if include_hetatm is not None:
+        filters.append(f"include_hetatm={include_hetatm}")
+    if include_hydrogens is not None:
+        filters.append(f"include_hydrogens={include_hydrogens}")
+    if altloc_policy is not None:
+        filters.append(f"altloc_policy={altloc_policy!r}")
+    suffix = f" after filters ({', '.join(filters)})" if filters else ""
+    raise ValueError(f"{group_name} chain(s) {chain_ids} contain no scored atoms{suffix}")
+
+
 # ── biopython helpers ────────────────────────────────────────────────────────
 
-def _select_real_atom(atom):
-    """Return a concrete (non-disordered) Atom for altloc ' ' or 'A'.
+def _atom_label(atom) -> str:
+    try:
+        structure_id, model_id, chain_id, residue_id, atom_id = atom.get_full_id()
+        return f"chain {chain_id}, residue {residue_id}, atom {atom_id}"
+    except Exception:  # noqa: BLE001
+        return f"atom {getattr(atom, 'name', '<unknown>')}"
+
+
+def _select_real_atom(atom, altloc_policy: str):
+    """Return a concrete (non-disordered) Atom according to altloc_policy.
 
     Returns None if no acceptable altloc exists.
     """
     if atom.is_disordered():
         child_dict = atom.child_dict
-        for altloc in ("A", " "):
-            if altloc in child_dict:
-                return child_dict[altloc]
+        altlocs = [(altloc or " ") for altloc in child_dict]
+        non_blank = [altloc for altloc in altlocs if altloc != " "]
+        if altloc_policy == "fail":
+            if non_blank:
+                raise ValueError(
+                    f"alternate locations {sorted(altlocs)} found for {_atom_label(atom)}; "
+                    "set altloc_policy='highest_occupancy' or 'sc_rs' explicitly"
+                )
+            return child_dict.get(" ")
+        if altloc_policy == "sc_rs":
+            for altloc in ("A", " "):
+                if altloc in child_dict:
+                    return child_dict[altloc]
+            return None
+        if altloc_policy == "highest_occupancy":
+            children = list(child_dict.values())
+            ranked = sorted(
+                children,
+                key=lambda child: (
+                    float(child.occupancy) if child.occupancy is not None else -1.0,
+                    str(child.altloc or " "),
+                ),
+                reverse=True,
+            )
+            best = ranked[0]
+            best_occ = best.occupancy
+            tied = [
+                child for child in ranked
+                if child.occupancy == best_occ and (child.altloc or " ") != (best.altloc or " ")
+            ]
+            if tied:
+                raise ValueError(
+                    f"alternate locations for {_atom_label(atom)} have tied highest "
+                    f"occupancy {best_occ!r}; cannot select deterministically"
+                )
+            return best
         return None
-    altloc = atom.altloc
-    if altloc not in (" ", "A"):
+    altloc = atom.altloc or " "
+    if altloc_policy == "fail" and altloc != " ":
+        raise ValueError(
+            f"alternate location {altloc!r} found for {_atom_label(atom)}; "
+            "set altloc_policy='highest_occupancy' or 'sc_rs' explicitly"
+        )
+    if altloc_policy == "sc_rs" and altloc not in (" ", "A"):
         return None
     return atom
 
@@ -65,6 +208,7 @@ def _extract_atom_arrays(
     chains: list[str],
     include_hetatm: bool,
     include_hydrogens: bool,
+    altloc_policy: str,
 ) -> tuple[list[list[float]], list[str], list[str]]:
     coords: list[list[float]] = []
     atom_names: list[str] = []
@@ -79,7 +223,7 @@ def _extract_atom_arrays(
             if not include_hetatm and het != " ":
                 continue
             for disordered_or_atom in residue.get_atoms():
-                real = _select_real_atom(disordered_or_atom)
+                real = _select_real_atom(disordered_or_atom, altloc_policy)
                 if real is None:
                     continue
                 atom_name = real.name.strip()
@@ -115,6 +259,7 @@ def from_structure(
     model: int = 0,
     include_hetatm: bool = False,
     include_hydrogens: bool = False,
+    altloc_policy: str = "fail",
     parallel: bool = True,
 ) -> ScResult:
     """Compute SC from a biopython Structure object.
@@ -126,21 +271,44 @@ def from_structure(
         model:              model index (0-based)
         include_hetatm:     include HETATM residues (default False, matches sc-rs)
         include_hydrogens:  include hydrogen atoms (default False, matches sc-rs)
+        altloc_policy:      'fail' (default), 'highest_occupancy', or 'sc_rs'
         parallel:           enable Rayon parallelism inside sc-rs
     """
+    _validate_altloc_policy(altloc_policy)
     models = list(structure.get_models())
-    if model >= len(models):
+    if model < 0 or model >= len(models):
         raise ValueError(
             f"model index {model} out of range (structure has {len(models)} model(s))"
         )
     m = models[model]
 
-    if chains_b is None:
-        all_chain_ids = {ch.id for ch in m.get_chains()}
-        chains_b = sorted(all_chain_ids - set(chains_a))
+    available_chains = [ch.id for ch in m.get_chains()]
+    chains_a, chains_b = _resolve_chain_groups(
+        chains_a, chains_b, available_chains, "structure"
+    )
 
-    coords_a, names_a, res_a = _extract_atom_arrays(m, chains_a, include_hetatm, include_hydrogens)
-    coords_b, names_b, res_b = _extract_atom_arrays(m, chains_b, include_hetatm, include_hydrogens)
+    coords_a, names_a, res_a = _extract_atom_arrays(
+        m, chains_a, include_hetatm, include_hydrogens, altloc_policy
+    )
+    coords_b, names_b, res_b = _extract_atom_arrays(
+        m, chains_b, include_hetatm, include_hydrogens, altloc_policy
+    )
+    _require_nonempty_atoms(
+        "chains_a",
+        chains_a,
+        coords_a,
+        include_hetatm=include_hetatm,
+        include_hydrogens=include_hydrogens,
+        altloc_policy=altloc_policy,
+    )
+    _require_nonempty_atoms(
+        "chains_b",
+        chains_b,
+        coords_b,
+        include_hetatm=include_hetatm,
+        include_hydrogens=include_hydrogens,
+        altloc_policy=altloc_policy,
+    )
 
     return compute_sc(coords_a, names_a, res_a, coords_b, names_b, res_b, parallel)
 
@@ -152,6 +320,7 @@ def from_pdb(
     model: int = 0,
     include_hetatm: bool = False,
     include_hydrogens: bool = False,
+    altloc_policy: str = "fail",
     parallel: bool = True,
 ) -> ScResult:
     """Compute SC from a PDB or mmCIF file.
@@ -163,6 +332,7 @@ def from_pdb(
         model:              model index (0-based, default first model)
         include_hetatm:     include HETATM residues (default False)
         include_hydrogens:  include hydrogen atoms (default False)
+        altloc_policy:      'fail' (default), 'highest_occupancy', or 'sc_rs'
         parallel:           enable Rayon parallelism inside sc-rs
     """
     structure = _load_structure(pdb_path)
@@ -173,6 +343,7 @@ def from_pdb(
         model=model,
         include_hetatm=include_hetatm,
         include_hydrogens=include_hydrogens,
+        altloc_policy=altloc_policy,
         parallel=parallel,
     )
 
@@ -251,6 +422,43 @@ def _extract_boltzgen_chains(
     return coords, atom_names, res_names
 
 
+# Required numpy structured-array fields per top-level attribute. The function
+# is duck-typed against this layout — no boltzgen import is performed.
+_BOLTZGEN_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "chains":   ("name", "res_idx", "res_num"),
+    "residues": ("name", "atom_idx", "atom_num"),
+    "atoms":    ("name", "coords", "is_present"),
+}
+
+
+def _validate_boltzgen_layout(structure) -> None:
+    """Raise TypeError with a clear message if `structure` does not have the
+    required attributes / numpy structured-array fields. Catches drift in
+    upstream BoltzGen and accidental misuse of the duck-typed API."""
+    for attr, required in _BOLTZGEN_REQUIRED_FIELDS.items():
+        arr = getattr(structure, attr, None)
+        if arr is None:
+            raise TypeError(
+                f"from_boltzgen_structure: object is missing .{attr}; "
+                f"expected a BoltzGen Structure (or duck-typed equivalent) "
+                f"with .chains / .residues / .atoms numpy structured arrays."
+            )
+        names = getattr(getattr(arr, "dtype", None), "names", None)
+        if names is None:
+            raise TypeError(
+                f"from_boltzgen_structure: .{attr} is not a numpy structured array "
+                f"(got {type(arr).__name__})."
+            )
+        missing = [f for f in required if f not in names]
+        if missing:
+            raise TypeError(
+                f"from_boltzgen_structure: .{attr} is missing required field(s) "
+                f"{missing}. Present fields: {tuple(names)}. The expected layout "
+                f"matches boltzgen.data.data.Structure; if BoltzGen has changed "
+                f"its schema, file an issue."
+            )
+
+
 def from_boltzgen_structure(
     structure,
     chains_a: list[str],
@@ -258,10 +466,25 @@ def from_boltzgen_structure(
     include_hydrogens: bool = False,
     parallel: bool = True,
 ) -> ScResult:
-    """Compute SC from an in-memory BoltzGen Structure object.
+    """Compute SC from an in-memory BoltzGen-shaped structure.
 
-    Accepts any object with .atoms / .residues / .chains numpy structured arrays
-    matching the BoltzGen dtype layout (boltzgen.data.data.Structure).
+    The function is **duck-typed**: it does not import `boltzgen`, does not
+    isinstance-check, and accepts any object with the numpy structured-array
+    layout below. A real ``boltzgen.data.data.Structure`` works; so does any
+    custom object exposing the same attributes and fields.
+
+    Required layout (verified at runtime — drift raises ``TypeError``):
+
+    ============ =============================== ===================================
+    Attribute    numpy struct fields used        meaning
+    ============ =============================== ===================================
+    ``.chains``   ``name``, ``res_idx``,         chain table; res_idx/res_num
+                  ``res_num``                    point into .residues
+    ``.residues`` ``name``, ``atom_idx``,        residue table; atom_idx/atom_num
+                  ``atom_num``                   point into .atoms
+    ``.atoms``    ``name``, ``coords`` (3-vec),  per-atom records; ``is_present``
+                  ``is_present`` (bool)          False atoms are skipped
+    ============ =============================== ===================================
 
     Args:
         structure:          BoltzGen Structure (or duck-typed equivalent)
@@ -270,22 +493,34 @@ def from_boltzgen_structure(
         include_hydrogens:  include hydrogen atoms (default False)
         parallel:           enable Rayon parallelism inside sc-rs
 
-    Important: use post-refold structures for meaningful SC scores. Structures
-    from intermediate_designs/ have zeroed sidechain coordinates and will give
-    unreliable results. Prefer from_boltzgen_refold() on the refold_cif files,
-    or load the Structure NPZ from intermediate_designs_inverse_folded/ after
-    refolding completes.
-    """
-    all_chain_names = [str(n) for n in structure.chains["name"]]
+    Raises:
+        TypeError: if `structure` does not match the layout above.
 
-    if chains_b is None:
-        chains_a_set = set(chains_a)
-        chains_b = list(dict.fromkeys(
-            n for n in all_chain_names if n not in chains_a_set
-        ))
+    Note: this function is currently not exported from the public API pending
+    end-to-end validation against a Structure produced by an actual BoltzGen
+    inference run. For refold_cif/*.cif files on disk, use
+    :func:`from_boltzgen_refold` (validated against real refold output).
+    """
+    _validate_boltzgen_layout(structure)
+    all_chain_names = [str(n) for n in structure.chains["name"]]
+    chains_a, chains_b = _resolve_chain_groups(
+        chains_a, chains_b, all_chain_names, "BoltzGen Structure"
+    )
 
     coords_a, names_a, res_a = _extract_boltzgen_chains(structure, chains_a, include_hydrogens)
     coords_b, names_b, res_b = _extract_boltzgen_chains(structure, chains_b, include_hydrogens)
+    _require_nonempty_atoms(
+        "chains_a",
+        chains_a,
+        coords_a,
+        include_hydrogens=include_hydrogens,
+    )
+    _require_nonempty_atoms(
+        "chains_b",
+        chains_b,
+        coords_b,
+        include_hydrogens=include_hydrogens,
+    )
 
     return compute_sc(coords_a, names_a, res_a, coords_b, names_b, res_b, parallel)
 
@@ -318,18 +553,21 @@ def from_biotite(
         include_hydrogens:  include hydrogen atoms (default False)
         parallel:           enable Rayon parallelism inside sc-rs
     """
-    # Support AtomArrayStack by taking the first model
     try:
         import biotite.structure as struc
-        if isinstance(atom_array, struc.AtomArrayStack):
-            atom_array = atom_array[0]
-    except ImportError:
-        pass  # duck-typing fallback: assume it already behaves like an AtomArray
+    except ImportError as exc:
+        raise ImportError(
+            "biotite is required for from_biotite(). Install it with: pip install biotite"
+        ) from exc
+
+    # Support AtomArrayStack by taking the first model
+    if isinstance(atom_array, struc.AtomArrayStack):
+        atom_array = atom_array[0]
 
     all_chains = list(dict.fromkeys(str(c) for c in atom_array.chain_id))
-    if chains_b is None:
-        chains_a_set = set(chains_a)
-        chains_b = [c for c in all_chains if c not in chains_a_set]
+    chains_a, chains_b = _resolve_chain_groups(
+        chains_a, chains_b, all_chains, "AtomArray"
+    )
 
     def _extract(chain_ids: list[str]) -> tuple[list, list, list]:
         mask = np.zeros(len(atom_array), dtype=bool)
@@ -355,6 +593,20 @@ def from_biotite(
 
     coords_a, names_a, res_a = _extract(chains_a)
     coords_b, names_b, res_b = _extract(chains_b)
+    _require_nonempty_atoms(
+        "chains_a",
+        chains_a,
+        coords_a,
+        include_hetatm=include_hetatm,
+        include_hydrogens=include_hydrogens,
+    )
+    _require_nonempty_atoms(
+        "chains_b",
+        chains_b,
+        coords_b,
+        include_hetatm=include_hetatm,
+        include_hydrogens=include_hydrogens,
+    )
     return compute_sc(coords_a, names_a, res_a, coords_b, names_b, res_b, parallel)
 
 
@@ -367,8 +619,18 @@ def from_boltzgen_refold(
 ) -> ScResult:
     """Compute SC from a BoltzGen refold_cif/*.cif file using biotite.
 
-    This is the recommended entry point when scoring BoltzGen designs.
-    It mirrors the CIF-loading pattern used by BoltzGen's own analyze_utils.py.
+    BoltzGen writes its chain IDs to the mmCIF ``label_asym_id`` column, not the
+    ``auth_asym_id`` column that biopython and biotite default to. Loading a
+    refold_cif via :func:`from_pdb` (biopython MMCIFParser, auth fields) or via
+    :func:`from_biotite` with biotite's default ``use_author_fields=True`` can
+    therefore look up chain IDs that don't exist in the file. This wrapper
+    calls biotite with ``use_author_fields=False`` so the chain IDs you pass
+    in `chains_a` / `chains_b` are matched against ``label_asym_id`` — the
+    column BoltzGen actually populates. It mirrors the CIF-loading pattern in
+    BoltzGen's own analyze_utils.py.
+
+    For any other mmCIF source (RCSB, AlphaFold, etc.) use :func:`from_pdb` or
+    :func:`from_structure` — they handle the standard ``auth_*`` convention.
 
     Args:
         refold_cif_path:    path to refold_cif/<id>.cif or refold_design_cif/<id>.cif

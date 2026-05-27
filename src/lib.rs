@@ -1,3 +1,5 @@
+#![allow(clippy::useless_conversion)]
+
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use sc_rs::sc::{types::Atom, vector3::Vec3, ScCalculator};
@@ -28,9 +30,10 @@ impl ScResult {
 
 /// Compute Lawrence-Colman Shape Complementarity between two atom groups.
 ///
-/// Mirrors the exact behavior of the sc-rs CLI binary. Atom radii are assigned
-/// automatically from atom name + residue name; atoms without a known radius
-/// are silently dropped by the upstream library.
+/// Mirrors the sc-rs library calculation after validating Python inputs.
+/// Atom radii are assigned automatically from atom name + residue name; atoms
+/// without a specific radius may use sc-rs generic element fallback, otherwise
+/// sc-rs returns an error.
 ///
 /// Args:
 ///     coords_a, atom_names_a, residue_names_a: atoms for molecule A
@@ -40,6 +43,7 @@ impl ScResult {
 ///               oversubscription)
 #[pyfunction]
 #[pyo3(signature = (coords_a, atom_names_a, residue_names_a, coords_b, atom_names_b, residue_names_b, parallel=true))]
+#[allow(clippy::useless_conversion)]
 fn compute_sc(
     coords_a: Vec<[f64; 3]>,
     atom_names_a: Vec<String>,
@@ -67,6 +71,8 @@ fn compute_sc(
             "coords_b, atom_names_b, residue_names_b must all have the same length",
         ));
     }
+    validate_finite_coords("coords_a", &coords_a)?;
+    validate_finite_coords("coords_b", &coords_b)?;
 
     let mut calc = ScCalculator::new();
     calc.settings_mut().enable_parallel = parallel;
@@ -100,6 +106,21 @@ fn compute_sc(
         atoms_a: results.surfaces[0].n_atoms,
         atoms_b: results.surfaces[1].n_atoms,
     })
+}
+
+fn validate_finite_coords(label: &str, coords: &[[f64; 3]]) -> PyResult<()> {
+    let axis_names = ["x", "y", "z"];
+    for (i, c) in coords.iter().enumerate() {
+        for axis in 0..3 {
+            if !c[axis].is_finite() {
+                return Err(PyValueError::new_err(format!(
+                    "{label} contains non-finite coordinate at atom index {i}, axis {} ({}): {}",
+                    axis, axis_names[axis], c[axis]
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 #[pymodule]

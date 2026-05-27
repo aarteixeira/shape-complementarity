@@ -8,7 +8,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from shape_complementarity import from_biotite, from_boltzgen_structure
+from shape_complementarity import from_biotite
+
+# from_boltzgen_structure is un-exported from the public API pending
+# end-to-end validation against a Structure produced by a real BoltzGen
+# inference run. Tests still exercise the implementation directly.
+from shape_complementarity.io import from_boltzgen_structure
 from shape_complementarity._core import ScResult
 from shape_complementarity.io import _is_hydrogen
 
@@ -146,6 +151,15 @@ def test_from_boltzgen_structure_missing_chain():
         from_boltzgen_structure(struct, chains_a=["Z"], chains_b=["A"])
 
 
+def test_from_boltzgen_structure_overlapping_chains():
+    struct = _make_structure([
+        _ala_chain("A", 5, (0.0, 0.0, 0.0)),
+        _ala_chain("B", 5, (0.0, 5.0, 0.0)),
+    ])
+    with pytest.raises(ValueError, match="overlapping chain"):
+        from_boltzgen_structure(struct, chains_a=["A"], chains_b=["A"])
+
+
 def test_from_boltzgen_structure_skips_absent_atoms():
     """Atoms with is_present=False must be excluded."""
     Atom_dt = np.dtype([
@@ -255,7 +269,7 @@ def test_from_boltzgen_structure_determinism():
 try:
     import biotite.structure as _biotite_struc
     _HAS_BIOTITE = True
-except ImportError:
+except Exception:
     _HAS_BIOTITE = False
 
 requires_biotite = pytest.mark.skipif(
@@ -329,6 +343,18 @@ def test_from_biotite_chains_b_none():
     r_explicit = from_biotite(arr, ["A"], ["B"])
     r_implicit = from_biotite(arr, ["A"], None)
     assert r_explicit.sc == pytest.approx(r_implicit.sc, abs=1e-9)
+
+
+@requires_biotite
+def test_from_biotite_missing_and_overlapping_chains_fail():
+    arr = _make_biotite_array([
+        _ala_chain("A", 10, (0.0, 0.0, 0.0)),
+        _ala_chain("B", 10, (0.0, 5.0, 0.0)),
+    ])
+    with pytest.raises(ValueError, match="chains_a.*not found"):
+        from_biotite(arr, ["Z"], ["B"])
+    with pytest.raises(ValueError, match="overlapping chain"):
+        from_biotite(arr, ["A"], ["A"])
 
 
 @requires_biotite
