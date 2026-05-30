@@ -1,8 +1,8 @@
 # shape_complementarity [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Python bindings to [sc-rs](https://github.com/cytokineking/sc-rs) for computing
-**Lawrence-Colman Shape Complementarity (SC)** between two protein chains.
-Useful for analysing protein–protein interfaces, including in computational
+**Lawrence-Colman Shape Complementarity (SC)** between two protein chain groups.
+Useful for analyzing protein–protein interfaces, including in computational
 design pipelines.
 
 `shape_complementarity` is **not** a reimplementation of the SC algorithm. All algorithmic
@@ -14,20 +14,24 @@ directly via PyO3. If you find a numerical result surprising, verify against the
 
 ## Install
 
-**Development (editable, re-run after Rust changes):**
+**Development:**
+
+Use any isolated Python 3.10+ environment. For example:
+
 ```bash
-~/miniforge3/bin/python3 -m venv .venv
-.venv/bin/python -m pip install -U pip setuptools wheel
-.venv/bin/python -m pip install -e ".[test]"
-.venv/bin/python -m pip install maturin
-.venv/bin/maturin develop --release
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip setuptools wheel
+python -m pip install -e ".[test]"
+python -m pip install maturin
+maturin develop --release
 ```
 
-If your shell still has `CONDA_PREFIX` set, run
-`unset CONDA_PREFIX && source .venv/bin/activate && maturin develop --release`
-so maturin installs into `.venv` instead of the base conda environment.
+Re-run `maturin develop --release` after changing Rust code. If `maturin`
+installs into the wrong Python environment, check that your active shell is not
+still pointing at another environment, for example through `CONDA_PREFIX`.
 
-**Release / production:**
+**Published release, when available:**
 ```bash
 pip install shape-complementarity
 ```
@@ -38,7 +42,7 @@ pip install shape-complementarity
 
 ### 1. From a PDB or mmCIF file path
 
-The simplest entry point. Accepts `.pdb`, `.ent`, and `.cif` files.
+The simplest entry point. Accepts `.pdb`, `.ent`, `.cif`, and `.mmcif` files.
 
 ```python
 import shape_complementarity
@@ -87,7 +91,9 @@ Works with any biopython `Structure` regardless of how it was created
 ### 3. From a biotite AtomArray
 
 [biotite](https://www.biotite-python.org/) is used natively by BoltzGen's
-analysis stack. Pass an `AtomArray` or `AtomArrayStack` (first model is used).
+analysis stack. Install `biotite` to use this API; it is included in the
+development `test` extra. Pass an `AtomArray` or `AtomArrayStack` (first model
+is used).
 
 ```python
 import biotite.structure.io.pdbx as pdbx
@@ -158,6 +164,8 @@ result = shape_complementarity.from_boltzgen_refold(
 )
 ```
 
+`from_boltzgen_refold()` requires `biotite`.
+
 > **Which stage to use?** Only `refold_cif/` structures have complete, physically
 > validated all-atom coordinates. `intermediate_designs/` NPZ files (post-generation)
 > have backbone-only coordinates; `intermediate_designs_inverse_folded/` NPZ files
@@ -195,7 +203,7 @@ to avoid oversubscription with multiple processes.
 
 ## Intake-format equivalence
 
-Every supported loader is locked together by
+The public file/object loaders are locked together by
 [`tests/test_format_equivalence.py`](tests/test_format_equivalence.py), which
 verifies that loading the same structure (1FYT chains D vs A) through each
 entry point yields the same `sc` and atom counts:
@@ -205,24 +213,23 @@ entry point yields the same `sc` and atom counts:
 | `from_pdb(.pdb)` ↔ `from_pdb(.cif)` (biopython PDBParser vs MMCIFParser) | 10⁻⁶ | sc = 0.6597, 1521 + 1479 atoms |
 | `from_structure(pre-parsed)` ↔ `from_pdb(file)` | 10⁻⁶ | identical |
 | `from_biotite(CIF via biotite)` ↔ `from_pdb(.pdb)` | 10⁻³ SC, ±5 atoms | identical |
-| `from_boltzgen_structure(1FYT-shaped struct)` ↔ `from_pdb(.pdb)` | 10⁻⁶ | identical |
 
-Empirically all four comparisons currently pass at the tight end of their
-tolerance. Any future parser change that shifts atom selection or coordinate
-rounding will fail the suite immediately.
+These comparisons are expected to pass at the tight end of their tolerance. A
+future parser change that shifts atom selection or coordinate rounding should
+fail this suite.
 
 This is in addition to the value-matching tests in
 [`tests/test_parity.py`](tests/test_parity.py), which run the actual `sc-rs`
 CLI binary on disk and confirm `sc`, `median_distance`, `trimmed_area`, and
 atom counts all agree to within 10⁻³ — a tolerance set by LLVM FMA-folding
-differences between independently compiled cdylib and binary, not by anything
-algorithmic.
+differences between independently compiled cdylib and binary.
 
 ---
 
 ## ScResult
 
-All functions return an `ScResult` with these read-only properties:
+Single-structure scoring functions return an `ScResult` with these read-only
+properties:
 
 | Property | Type | Description |
 |---|---|---|
@@ -255,8 +262,8 @@ the sign flip becomes −1). That is, two surfaces stacked on top of each other
 rather than mated face-to-face. Concretely, scoring chain A of 1FYT against an
 identical copy of itself placed at the same coordinates yields `sc ≈ −0.999`;
 shifting one copy by just 1 Å already brings the score back to ≈ 0 because the
-`exp(−w·d²)` term collapses. Real interfaces never look like this, so for any
-physically reasonable complex you should expect a value in [0, 1].
+`exp(−w·d²)` term collapses. For ordinary protein interfaces, values should
+usually fall in [0, 1].
 
 `shape_complementarity` reports whatever `sc-rs` returns without clamping, so
 the strict range is −1 to 1.
@@ -281,12 +288,13 @@ passing = designs[designs["sc"] >= threshold]
 
 ## Rosetta / PyRosetta validation
 
-PyRosetta is not a package dependency. In an environment where `import
-pyrosetta` works, validate against Rosetta `InterfaceAnalyzerMover` with:
+PyRosetta is optional and is not a package dependency. In an environment where
+`import pyrosetta` works, validate against Rosetta `InterfaceAnalyzerMover`
+with:
 
 ```bash
-.venv/bin/python validation/rosetta_interface_sc.py --format tsv
-.venv/bin/python -m pytest -q -m rosetta
+python validation/rosetta_interface_sc.py --format tsv
+python -m pytest -q -m rosetta
 ```
 
 The validation script compares bundled 1FYT and nanobody-antigen fixtures
@@ -298,9 +306,9 @@ test is skipped with an explicit message.
 
 ## Benchmark
 
-Run `python benchmark/speed.py` after `maturin develop --release`. Example output
-on an Apple M3 Pro (10-core) with 1FYT chains D vs A (1521+1479 heavy atoms,
-~190 residues each):
+Run `python benchmark/speed.py` after `maturin develop --release`. One local
+run on an Apple M3 Pro (10-core), using 1FYT chains D vs A (1521+1479 heavy
+atoms, ~190 residues each), produced:
 
 ```
 === shape_complementarity speed benchmark ===
@@ -312,9 +320,9 @@ on an Apple M3 Pro (10-core) with 1FYT chains D vs A (1521+1479 heavy atoms,
 All targets met.
 ```
 
-The first `from_pdb` call in a fresh process incurs a one-time ~400 ms cost for
-Rust shared-library initialisation. Subsequent calls run at steady-state speed
-as shown above. `score_many` amortises this across worker processes.
+The first `from_pdb` call in a fresh process can incur a one-time Rust
+shared-library initialization cost. Subsequent calls run at steady-state speed.
+`score_many` amortizes this across worker processes.
 
 ---
 
